@@ -43,22 +43,31 @@ const Model = ({ texturePath }) => {
   }, [scene, texture]);
 
   /** 3. Center and normalize height */
-  useEffect(() => {
-    const box = new THREE.Box3().setFromObject(scene);
-    const center = new THREE.Vector3();
-    const size = box.getSize(new THREE.Vector3());
+ /** 3. Center, scale & rotate model */
+useEffect(() => {
+  const box = new THREE.Box3().setFromObject(scene);
+  const center = new THREE.Vector3();
+  const size = box.getSize(new THREE.Vector3());
 
-    // center
-    box.getCenter(center);
-    scene.position.sub(center);
+  // center
+  box.getCenter(center);
+  scene.position.sub(center);
 
-    // scale so mannequin height becomes approx 1.7 units
-    const targetHeight = 1.7;
-    const scaleFactor = targetHeight / size.y;
-    scene.scale.setScalar(scaleFactor);
-  }, [scene]);
+  // normalize height
+  const targetHeight = 1.6;
+  const scaleFactor = targetHeight / size.y;
+  scene.scale.setScalar(scaleFactor);
 
-  return <primitive object={scene} />;
+  // FIX: rotate in correct facing direction (your GLB faces sideways)
+  scene.rotation.set(0, Math.PI, 0);
+
+  // Raise model slightly so it’s not under the camera
+  scene.position.y -= size.y * scaleFactor * 0.15;
+
+}, [scene]);
+
+return <primitive object={scene} position={[0, -0.4, 0]} />;
+
 };
 
 const ModelViewer = ({ texturePath, autoRotate }) => (
