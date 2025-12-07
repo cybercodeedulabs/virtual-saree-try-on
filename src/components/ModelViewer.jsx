@@ -1,68 +1,130 @@
-// src/components/ModelViewer.jsx
-import { useGLTF, useTexture, OrbitControls } from '@react-three/drei';
-import { Canvas } from '@react-three/fiber';
-import * as THREE from 'three';
-import { Suspense, useEffect, useRef } from 'react';
-import { Html } from '@react-three/drei';
+// src/components/ModelViewer.jsx  -- DEBUG VERSION
+import React, { Suspense, useEffect, useRef, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls, Html, useGLTF } from "@react-three/drei";
+import * as THREE from "three";
 
+/**
+ * Debug GLTF viewer:
+ * - logs mesh names & counts
+ * - shows simple material view and textured view toggle
+ */
 
-const Model = ({ texturePath }) => {
-  const { scene, materials } = useGLTF('/models/sareeanimation_glb.glb');
-  const texture = useTexture(texturePath);
-  const ref = useRef();
+function ModelDebug({ modelUrl, textureUrl }) {
+  const gltf = useGLTF(modelUrl, true);
+  const [mode, setMode] = useState("plain"); // "plain" | "textured"
+  const texture = textureUrl ? new THREE.TextureLoader().load(textureUrl) : null;
+  if (texture) {
+    texture.encoding = THREE.sRGBEncoding;
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 4;
+  }
 
-  // Apply texture to saree material
   useEffect(() => {
-    const sareeMaterial = Object.values(materials).find((mat) =>
-      mat.name.toLowerCase().includes('saree')
-    );
-    if (sareeMaterial) {
-      sareeMaterial.map = texture;
-      sareeMaterial.map.encoding = THREE.sRGBEncoding;
-      sareeMaterial.needsUpdate = true;
+    if (!gltf || !gltf.scene) return;
+    // Print scene summary
+    const meshes = [];
+    gltf.scene.traverse((c) => {
+      if (c.isMesh) {
+        meshes.push({ name: c.name || "(no-name)", vertices: c.geometry?.attributes?.position?.count || 0 });
+      }
+    });
+    console.groupCollapsed("GLTF Debug Info");
+    console.log("Model URL:", modelUrl);
+    console.log("Mesh count:", meshes.length);
+    meshes.forEach((m, i) => console.log(i, m.name, "vertices:", m.vertices));
+    // bounding box
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    console.log("Bounding box:", box.min, box.max, "size:", box.getSize(new THREE.Vector3()));
+    console.groupEnd();
+    // center and scale normalization
+    const size = box.getSize(new THREE.Vector3()).length();
+    if (size > 0) {
+      const scaleFactor = 2.5 / size; // bring model into reasonable scene scale
+      gltf.scene.scale.setScalar(scaleFactor);
     }
-  }, [texture, materials]);
+    const center = box.getCenter(new THREE.Vector3());
+    gltf.scene.position.sub(center);
+  }, [gltf, modelUrl]);
 
-  // Center the model
   useEffect(() => {
-    const box = new THREE.Box3().setFromObject(scene);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    scene.position.sub(center);
-  }, [scene]);
+    if (!gltf || !gltf.scene) return;
+    // Apply materials
+    gltf.scene.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        // Ensure normals exist
+        try {
+          if (!child.geometry.attributes.normal) {
+            child.geometry.computeVertexNormals();
+          }
+        } catch (e) {
+          console.warn("Failed to compute normals for", child.name, e);
+        }
+
+        if (mode === "plain") {
+          child.material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(0xdddddd),
+            roughness: 0.7,
+            metalness: 0.0,
+            side: THREE.DoubleSide,
+          });
+        } else {
+          // textured view: apply texture if available, else fallback
+          child.material = texture
+            ? new THREE.MeshStandardMaterial({
+                map: texture,
+                roughness: 0.6,
+                metalness: 0,
+                side: THREE.DoubleSide,
+              })
+            : new THREE.MeshStandardMaterial({
+                color: new THREE.Color(0xcccccc),
+                roughness: 0.7,
+                metalness: 0,
+                side: THREE.DoubleSide,
+              });
+        }
+      }
+    });
+  }, [gltf, mode, texture]);
 
   return (
-    <primitive ref={ref} object={scene} scale={[0.01, 0.01, 0.01]} position={[0, 0, 0]} />
+    <>
+      <Html position={[0, 2.2, 0]} center>
+        <div style={{ width: 380, textAlign: "center", padding: 8, background: "rgba(255,255,255,0.85)", borderRadius: 8 }}>
+          <div style={{ marginBottom: 8 }}>
+            <strong>Debug Viewer</strong>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button onClick={() => setMode("plain")} style={{ padding: "6px 10px" }}>
+              Plain
+            </button>
+            <button onClick={() => setMode("textured")} style={{ padding: "6px 10px" }}>
+              Textured
+            </button>
+          </div>
+        </div>
+      </Html>
+
+      <primitive object={gltf.scene} />
+    </>
   );
-};
+}
 
-const ModelViewer = ({ texturePath, autoRotate }) => (
-  <div className="w-full aspect-[3/2] rounded-2xl shadow-2xl p-4 bg-white/30 backdrop-blur">
-    <Canvas camera={{ position: [0, 1.5, 10] }}>
-      <ambientLight intensity={2} />
-      <directionalLight position={[5, 10, 7]} intensity={1} />
-
-      <Suspense
-        fallback={
-          <Html center>
-            <div className="text-xl text-gray-700 animate-pulse">Loading Saree...</div>
-          </Html>
-        }
-      >
-        <Model texturePath={texturePath} />
-      </Suspense>
-
-      <OrbitControls
-        target={[0, 1, 0]}
-        minDistance={2.5}
-        maxDistance={12}
-        enableZoom={true}
-        enablePan={false}
-        enableRotate={true}
-        autoRotate={autoRotate}
-      />
-    </Canvas>
-  </div>
-);
-
-export default ModelViewer;
+export default function ModelViewer({ texturePath = "/textures/red-saree.jpg", autoRotate = true }) {
+  return (
+    <div className="w-full h-[620px] rounded-2xl shadow-2xl p-4 bg-white/5 backdrop-blur">
+      <Canvas shadows camera={{ position: [0, 1.6, 4], fov: 40 }}>
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[5, 8, 5]} intensity={1.0} />
+        <Suspense fallback={<Html center><div>Loading model...</div></Html>}>
+          <ModelDebug modelUrl={"/models/sareeanimation_glb.glb"} textureUrl={texturePath} />
+        </Suspense>
+        <OrbitControls enablePan={false} autoRotate={autoRotate} />
+      </Canvas>
+    </div>
+  );
+}
