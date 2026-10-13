@@ -1,150 +1,218 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ModelViewer from './components/ModelViewer';
-import logo from '/logo.png';
+import { VIEWS } from './components/views';
+import ProductPanel from './components/ProductPanel';
+import CollectionPanel from './components/CollectionPanel';
+import StageControls from './components/StageControls';
+import { CATALOG, sareeFromUpload } from './data/catalog';
+import { SHOWROOM } from './config';
+import { releaseSaree, warmCollection } from './lib/sareeTextures';
+import { QA, QAOverlay } from './components/QAProbe';
 
-const App = () => {
-  const [texture, setTexture] = useState('/textures/red-saree.jpg');
-  const [uploadedURL, setUploadedURL] = useState(null);
-  const [autoRotate, setAutoRotate] = useState(true);
-  const [skinTone, setSkinTone] = useState('');
+const params = new URLSearchParams(window.location.search);
+const KIOSK = params.has('kiosk');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled;
+const VIEW_KEYS = Object.keys(VIEWS);
 
-  const textureOptions = [
-    'red-saree.jpg',
-    'yellow-saree.jpg',
-    'orange-saree.png',
-    'blue-saree.jpg',
-  ];
+export default function App() {
+  const [family, setFamily] = useState('All');
+  const [item, setItem] = useState(CATALOG[0]);
+  const [uploads, setUploads] = useState([]);
+  const [view, setView] = useState('front');
+  const [viewNonce, setViewNonce] = useState(0);
+  const [userRotate, setUserRotate] = useState(!reducedMotion);
+  const [idleRotate, setIdleRotate] = useState(false);
+  const [attract, setAttract] = useState(false);
+  const [draping, setDraping] = useState(false);
+  const [error, setError] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const lastInput = useRef(0);
 
-  const skinToneRecommendations = {
-    fair: 'red-saree.jpg',
-    medium: 'blue-saree.jpg',
-    dusky: 'yellow-saree.jpg',
+  const items = useMemo(
+    () => (family === 'All' ? CATALOG : CATALOG.filter((s) => s.family === family)),
+    [family],
+  );
+  const index = CATALOG.findIndex((s) => s.id === item.id);
+
+  const goView = useCallback((v) => {
+    setView(v);
+    setViewNonce((n) => n + 1); // re-applies the same view after the user has moved the camera
+  }, []);
+
+  const select = useCallback((s) => {
+    setError(null);
+    setItem(s);
+  }, []);
+
+  const step = useCallback(
+    (dir) => {
+      const list = items.length ? items : CATALOG;
+      const i = list.findIndex((s) => s.id === item.id);
+      select(list[(i + dir + list.length) % list.length]);
+    },
+    [items, item.id, select],
+  );
+
+  // ---- inactivity: start turning, then (kiosk) cycle through the collection ----
+  const markInput = useCallback(() => {
+    lastInput.current = performance.now();
+    setIdleRotate(false);
+    setAttract(false);
+  }, []);
+
+  useEffect(() => {
+    lastInput.current = performance.now();
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'];
+    events.forEach((e) => window.addEventListener(e, markInput, { passive: true }));
+    const t = setInterval(() => {
+      const idle = performance.now() - lastInput.current;
+      if (!reducedMotion && idle > SHOWROOM.idleRotateAfterMs) setIdleRotate(true);
+      if (KIOSK && idle > SHOWROOM.attractAfterMs) setAttract(true);
+    }, 1000);
+    return () => {
+      clearInterval(t);
+      events.forEach((e) => window.removeEventListener(e, markInput));
+    };
+  }, [markInput]);
+
+  useEffect(() => {
+    if (!attract) return;
+    setFamily('All');
+    goView('front');
+    const t = setInterval(() => {
+      setItem((cur) => CATALOG[(CATALOG.findIndex((s) => s.id === cur.id) + 1) % CATALOG.length]);
+    }, SHOWROOM.attractCycleMs);
+    return () => clearInterval(t);
+  }, [attract, goView]);
+
+  // build every saree in the background so switching is instant on the floor
+  useEffect(() => {
+    const t = setTimeout(() => warmCollection(CATALOG), 1500);
+    return () => clearTimeout(t);
+  }, []);
+
+  // ---- keyboard: arrows change saree, 1-5 change view ----
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === 'ArrowRight') step(1);
+      else if (e.key === 'ArrowLeft') step(-1);
+      else if (/^[1-5]$/.test(e.key)) goView(VIEW_KEYS[+e.key - 1]);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [step, goView]);
+
+  // ---- acceptance tests (?qa=1 only) ----
+  useEffect(() => {
+    if (QA) window.__qa = Object.assign(window.__qa ?? {}, { select, catalog: CATALOG, goView });
+  }, [select, goView]);
+
+  // ---- kiosk hardening ----
+  useEffect(() => {
+    if (!KIOSK) return;
+    const block = (e) => e.preventDefault();
+    window.addEventListener('contextmenu', block);
+    return () => window.removeEventListener('contextmenu', block);
+  }, []);
+
+  useEffect(() => {
+    const onFs = () => setFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
-  const handleTextureChange = (file) => {
-    setTexture(`/textures/${file}`);
-    setUploadedURL(null);
+  // ---- customer fabric photos ----
+  const handleUpload = (file, message) => {
+    setUploadError(message ?? null);
+    if (!file) return;
+    const saree = sareeFromUpload(URL.createObjectURL(file));
+    setUploads((prev) => {
+      const next = [saree, ...prev];
+      next.slice(3).forEach(releaseSaree); // keep the last three
+      return next.slice(0, 3);
+    });
+    select(saree);
   };
 
-  const handleUpload = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      setUploadedURL(URL.createObjectURL(file));
-    }
-  };
-
-  const suggestSaree = () => {
-    const suggestion = skinToneRecommendations[skinTone];
-    if (suggestion) {
-      setTexture(`/textures/${suggestion}`);
-      setUploadedURL(null);
-    }
-  };
-
-  const currentTexture = uploadedURL || texture;
+  const handleError = useCallback(
+    (err) => {
+      console.error(err);
+      if (item.isUpload) {
+        setUploadError('That photo could not be read. Try a JPG or PNG taken in good light.');
+        setUploads((prev) => prev.filter((u) => u.id !== item.id));
+        releaseSaree(item);
+        setItem(CATALOG[0]);
+      } else {
+        setError(`${item.name} could not be shown. Choose another saree from the collection.`);
+      }
+    },
+    [item],
+  );
 
   return (
-    <div
-      className="min-h-screen w-full overflow-x-hidden bg-cover bg-center bg-no-repeat p-4"
-      style={{ backgroundImage: "url('/textures/bg-fabric-light.jpeg')" }}
-      // style={{ backgroundImage: 'linear-gradient(135deg, #fdf6f0, #ffe3e1)' }}
-    >
-      <div className="w-full max-w-7xl mx-auto px-4">
-        {/* Header */}
-        <header className="flex items-center justify-between mb-6">
-          <img
-            src={logo}
-            alt="Logo"
-            className="w-24 h-auto object-contain max-w-[150px] sm:max-w-[120px] md:max-w-[100px]"
-          />
-          <h1 className="text-3xl font-bold text-gray-800 text-center flex-1">
-            Virtual Saree Try-On
-          </h1>
-          <div className="w-10 h-10 md:w-12 md:h-12" /> {/* Spacing symmetry */}
-        </header>
-
-        <div className="flex flex-col md:flex-row gap-8">
-          {/* Sidebar */}
-          <aside className="w-full md:w-1/4 bg-white/90 rounded-2xl p-6 shadow-xl space-y-6">
-            <div>
-              <h2 className="text-xl font-semibold mb-4">Choose Saree</h2>
-              <div className="space-y-3">
-                {textureOptions.map((file) => {
-                  const isActive = texture.includes(file) && !uploadedURL;
-                  const color = file.split('-')[0];
-                  return (
-                    <button
-                      key={file}
-                      onClick={() => handleTextureChange(file)}
-                      className={`w-full px-4 py-2 text-left rounded-lg border transition ${
-                        isActive
-                          ? 'bg-gray-800 text-white'
-                          : 'bg-white hover:bg-gray-100'
-                      }`}
-                    >
-                      {color}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Upload Option */}
-            <div>
-              <label className="block mb-2 text-sm font-medium text-gray-700">
-                Upload your own texture
-              </label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleUpload}
-                className="w-full text-sm border rounded-md p-2"
-              />
-            </div>
-
-            {/* Skin Tone Recommender */}
-            <div>
-              <label className="block mb-2 text-sm font-medium text-gray-700">
-                Select Skin Tone
-              </label>
-              <select
-                value={skinTone}
-                onChange={(e) => setSkinTone(e.target.value)}
-                className="w-full p-2 rounded-md border bg-white"
-              >
-                <option value="">-- Choose --</option>
-                <option value="fair">Fair</option>
-                <option value="medium">Medium</option>
-                <option value="dusky">Dusky</option>
-              </select>
-              <button
-                onClick={suggestSaree}
-                disabled={!skinTone}
-                className="w-full mt-3 px-4 py-2 rounded-lg bg-indigo-600 text-white disabled:opacity-50"
-              >
-                💡 Suggest Best Saree
-              </button>
-            </div>
-
-            {/* Rotation Toggle */}
-            <button
-              onClick={() => setAutoRotate(!autoRotate)}
-              className="w-full mt-4 px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm"
-            >
-              {autoRotate ? '⏸ Pause Rotation' : '▶️ Resume Rotation'}
-            </button>
-          </aside>
-
-          {/* 3D Viewer */}
-          <main className="flex-1 overflow-hidden">
-            <div className="w-full h-full overflow-hidden rounded-xl">
-              <ModelViewer texturePath={currentTexture} autoRotate={autoRotate} />
-            </div>
-          </main>
-        </div>
+    <div className={`app ${KIOSK ? 'is-kiosk' : ''}`}>
+      <div className="stage">
+        <ModelViewer
+          item={item}
+          view={view}
+          viewNonce={viewNonce}
+          autoRotate={userRotate || idleRotate}
+          onUserInteract={markInput}
+          onDraping={setDraping}
+          onError={handleError}
+        />
       </div>
+
+      <header className="brand">
+        <img src="/logo.webp" alt="" width="44" height="66" />
+        <span>{SHOWROOM.storeName}</span>
+      </header>
+
+      <aside className="left">
+        <ProductPanel key={item.id} item={item} draping={draping} index={index} total={CATALOG.length} />
+      </aside>
+
+      <aside className="right">
+        <CollectionPanel
+          items={items}
+          uploads={uploads}
+          activeId={item.id}
+          family={family}
+          onFamily={setFamily}
+          onSelect={select}
+          onUpload={handleUpload}
+          allowUpload={!KIOSK}
+          uploadError={uploadError}
+        />
+      </aside>
+
+      <StageControls
+        view={view}
+        onView={goView}
+        rotating={userRotate || idleRotate}
+        onToggleRotate={() => { setIdleRotate(false); setUserRotate((r) => !(r || idleRotate)); }}
+        onPrev={() => step(-1)}
+        onNext={() => step(1)}
+        fullscreen={fullscreen}
+        onToggleFullscreen={canFullscreen ? toggleFullscreen : null}
+      />
+
+      {QA && <QAOverlay />}
+
+      {error && (
+        <div className="toast" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)}>Dismiss</button>
+        </div>
+      )}
     </div>
   );
-};
-
-export default App;
+}

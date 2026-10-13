@@ -1,7 +1,7 @@
 {
-  "name": "saree-viewer",
+  "name": "virtual-saree-try-on",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,8 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.2.6",
+    "@fontsource/mukta": "^5.2.6",
     "@react-three/drei": "^10.1.2",
     "@react-three/fiber": "^9.1.2",
+    "camera-controls": "^2.10.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.177.0"

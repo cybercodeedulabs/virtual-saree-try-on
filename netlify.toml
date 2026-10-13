@@ -1,0 +1,25 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Hashed build files never change: cache for a year.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Model and fabrics: cache for a day, revalidate after.
+[[headers]]
+  for = "/models/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, must-revalidate"
+[[headers]]
+  for = "/catalog/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, must-revalidate"
+
+# The service worker must always be fresh so updates reach the showroom.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"

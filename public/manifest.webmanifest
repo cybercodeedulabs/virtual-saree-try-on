@@ -1,0 +1,10 @@
+{
+  "name": "Virtual Saree Try-On",
+  "short_name": "Saree Try-On",
+  "start_url": "/?kiosk=1",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#1d1320",
+  "theme_color": "#1d1320",
+  "icons": [{ "src": "/logo.png", "sizes": "267x400", "type": "image/png" }]
+}
