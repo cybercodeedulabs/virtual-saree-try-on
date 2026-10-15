@@ -15,6 +15,25 @@
   price: number or null (null hides the price).
 */
 export const CATALOG = [
+  // SOURCE: your own product photo (pink silk saree, sent 13 Oct 2026), converted into tiles:
+  // body = pink ground + the photo's butta motifs, border = measured zari border profile,
+  // pallu = straightened crop of the brocade with the photo's lighting evened out.
+  {
+    id: 'pink-silk',
+    name: 'Rani Pink Silk',
+    fabric: 'Silk with zari border and brocade pallu',
+    colour: 'Rani pink, gold and olive',
+    family: 'Pink',
+    code: 'SR-107',
+    price: null,
+    blouse: '#2f4a33',
+    chip: '/catalog/pink-silk/chip.jpg',
+    swatch: {
+      body: { src: '/catalog/pink-silk/body.jpg', tileCm: 35 },
+      border: { src: '/catalog/pink-silk/border.jpg', color: '#bd126d', zari: '#d9a04a', heightCm: 12.8 },
+      pallu: { src: '/catalog/pink-silk/pallu.jpg', tileCm: 40, color: '#5a5444', opacity: 1 },
+    },
+  },
   // SOURCE: generated sample design (not a real product). Replace before going live.
   {
     id: 'maroon-kanjivaram',
@@ -115,23 +134,33 @@ export const CATALOG = [
 
 export const FAMILIES = ['All', ...Array.from(new Set(CATALOG.map((s) => s.family)))];
 
-// A saree built from a customer's own fabric photo.
-export function sareeFromUpload(url, name = 'Your fabric') {
+// A saree prepared from a photo in the preparation step (see components/FabricPrep.jsx).
+// record: { id, name, blouse, body:{blob,tileCm}, border:{blob,heightCm,color}|null, pallu:{blob,tileCm,color}|null, chip: Blob }
+export function sareeFromPrepared(record, { saved = false } = {}) {
+  const urls = [];
+  const url = (blob) => { if (!blob) return null; const u = URL.createObjectURL(blob); urls.push(u); return u; };
+  const body = url(record.body.blob), border = url(record.border?.blob), pallu = url(record.pallu?.blob), chip = url(record.chip);
   return {
-    id: `upload-${Date.now()}`,
-    name,
-    fabric: 'Your photo, repeated as the body fabric',
-    colour: 'From your photo',
-    family: 'Yours',
+    id: record.id,
+    name: record.name,
+    fabric: saved ? 'Prepared from a photo' : 'Your photo',
+    colour: 'From the photo',
+    family: 'Prepared',
     code: null,
     price: null,
-    blouse: '#3b2a3f',
-    chip: url,
-    isUpload: true,
+    blouse: record.blouse,
+    chip: chip ?? body,
+    isUpload: !saved,
+    isSaved: saved,
+    blobUrls: urls,
     swatch: {
-      body: { src: url, tileCm: 30 },
-      border: { color: 'auto', zari: '#cfa957', heightCm: 11 },
-      pallu: { tileCm: 46, color: 'auto', opacity: 0.5 },
+      body: { src: body, tileCm: record.body.tileCm },
+      border: border
+        ? { src: border, color: record.border.color, zari: '#cfa957', heightCm: record.border.heightCm }
+        : { color: 'auto', zari: '#cfa957', heightCm: 11 },
+      pallu: pallu
+        ? { src: pallu, tileCm: record.pallu.tileCm, color: record.pallu.color, opacity: 1 }
+        : { tileCm: record.body.tileCm * 1.5, color: 'auto', opacity: 0.5 },
     },
   };
 }

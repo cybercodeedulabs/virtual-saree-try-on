@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { composeSaree, loadImage } from './composeSaree';
+import { composeSaree, forgetImage, loadImage } from './composeSaree';
 
 // Saree textures are expensive to build, so each one is made once and reused.
 const cache = new Map();
@@ -64,11 +64,14 @@ export function warmCollection(items) {
   next();
 }
 
-/** Free a customer upload once it is no longer on the mannequin. */
+/** Free a prepared saree (texture + its image URLs) once it is no longer needed. */
 export async function releaseSaree(item) {
-  if (!item?.isUpload || !cache.has(item.id)) return;
-  const p = cache.get(item.id);
-  cache.delete(item.id);
-  try { (await p).dispose(); } catch { /* already gone */ }
-  if (item.chip?.startsWith('blob:')) URL.revokeObjectURL(item.chip);
+  if (!item || !(item.isUpload || item.isSaved)) return;
+  if (cache.has(item.id)) {
+    const p = cache.get(item.id);
+    cache.delete(item.id);
+    try { (await p).dispose(); } catch { /* already gone */ }
+  }
+  for (const u of item.blobUrls ?? []) { forgetImage(u); URL.revokeObjectURL(u); }
+  if (item.chip?.startsWith('blob:') && !item.blobUrls?.includes(item.chip)) URL.revokeObjectURL(item.chip);
 }

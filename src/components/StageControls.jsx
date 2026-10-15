@@ -1,8 +1,8 @@
 import { VIEWS } from './views';
 
-export default function StageControls({ view, onView, rotating, onToggleRotate, onPrev, onNext, fullscreen, onToggleFullscreen }) {
+export default function StageControls({ inert, view, onView, rotating, onToggleRotate, onPrev, onNext, fullscreen, onToggleFullscreen }) {
   return (
-    <nav className="stage-controls" aria-label="Mannequin view">
+    <nav className="stage-controls" aria-label="Mannequin view" inert={inert}>
       <button type="button" className="ctl ctl-step" onClick={onPrev} aria-label="Previous saree">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
       </button>

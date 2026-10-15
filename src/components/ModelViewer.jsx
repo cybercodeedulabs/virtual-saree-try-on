@@ -81,10 +81,11 @@ function Loader() {
   );
 }
 
-export default function ModelViewer({ item, view, viewNonce, autoRotate, onUserInteract, onDraping, onError }) {
+export default function ModelViewer({ item, view, viewNonce, autoRotate, paused, onUserInteract, onDraping, onError }) {
   return (
     <Canvas
       className="stage-canvas"
+      frameloop={paused ? 'never' : 'always'}
       shadows
       dpr={[1, 2]}
       camera={{ fov: 30, near: 0.05, far: 40, position: VIEWS.front.pos }}

@@ -35,6 +35,36 @@ and keep working if the showroom Wi-Fi drops.
 
 Keyboard (for staff): left and right arrows change saree, keys 1-5 change the camera view.
 
+## Trying a saree from a photo
+
+Press **Try a saree from a photo** and choose any saree photo (product shot, flat lay, saree on a mannequin,
+or a close-up of the fabric). The saree is draped straight away, with no steps for the customer:
+
+- the background, mannequin and dress form are ignored
+- the **body** fabric is the main plain colour of the saree
+- the **border** is the straight band along the edge of the body fabric (its angle is found too)
+- the **pallu** is the largest patterned area that is neither body nor border
+- the blouse is a darker shade of the body colour
+
+A small message then offers **Save** (keep it on this screen, also offline), **Adjust** and **Close**.
+If no border or no separate pallu was found, the message says so; a matching plain border or the body
+fabric is used instead.
+
+Works best with: a clear photo of the whole saree or a flat lay on a plain background, in even light.
+Can go wrong with: grey, black or white sarees; busy backgrounds; heavily pleated or folded sarees
+(the folds show in the fabric); watermarked images (the watermark is copied too).
+
+**Adjust** (staff) opens the manual screen with body, border and pallu already marked:
+
+1. **Body fabric**: drag a new box over plain body fabric if needed. Check the 2 x 2 preview. Set the size of one repeat in cm.
+2. **Border**: straighten the photo until the border runs straight, then drag a box from the body
+   to the saree edge. Use *Flip* if the edge is not at the bottom of the preview. Set the border width in cm.
+3. **Pallu**: drag a box inside the pallu design. *Turn pattern 90°* until the bands run the right way.
+4. **Blouse and finish**: pick a blouse colour, then *Try on mannequin*, *Save to this device*, or
+   *Download for catalogue* (the tiles plus a ready-made `catalog.js` entry, to add it to the website for everyone).
+
+On the kiosk, customers do not see the photo button. Open `/?kiosk=1&staff=1` to use it on the kiosk.
+
 ## Adding a saree
 
 Edit `src/data/catalog.js`. Put images in `public/catalog/<id>/`. Two options:
@@ -54,9 +84,11 @@ Rebuild and deploy; the offline cache picks up the new files automatically.
 
 | Path | What it is |
 | --- | --- |
-| `public/models/saree_showroom.glb` | Mannequin, blouse and saree (1.65 m tall, faces +Z, meshopt-compressed) |
+| `public/models/saree_showroom.glb` | Mannequin, blouse and saree, covered drape (1.65 m tall, faces +Z, meshopt-compressed) |
 | `src/data/catalog.js` | The collection |
 | `src/config.js` | Store name, currency, kiosk timings |
+| `src/lib/autoDetect.js` | Finds body, border and pallu in a photo |
+| `src/lib/prepareTiles.js` | Turns marked regions of a photo into fabric tiles |
 | `src/lib/composeSaree.js` | Builds a full saree image from a swatch |
 | `src/lib/sareeTextures.js` | Loads, caches and pre-builds saree textures |
 | `src/components/Mannequin.jsx` | Applies the saree to the model |

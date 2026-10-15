@@ -3,7 +3,7 @@ import { FAMILIES } from '../data/catalog';
 
 const MAX_UPLOAD_MB = 15;
 
-export default function CollectionPanel({ items, uploads, activeId, family, onFamily, onSelect, onUpload, allowUpload, uploadError }) {
+export default function CollectionPanel({ items, uploads, activeId, family, onFamily, onSelect, onUpload, onRemoveSaved, allowUpload, uploadError }) {
   const fileRef = useRef(null);
 
   const handleFile = (e) => {
@@ -40,8 +40,11 @@ export default function CollectionPanel({ items, uploads, activeId, family, onFa
             >
               <img src={s.chip} alt="" loading="lazy" draggable="false" />
               <span className="chip-name">{s.name}</span>
-              <span className="chip-fabric">{s.isUpload ? 'Your fabric' : s.fabric}</span>
+              <span className="chip-fabric">{s.fabric}</span>
             </button>
+            {s.isSaved && allowUpload && (
+              <button type="button" className="chip-remove" onClick={() => onRemoveSaved(s)}>Remove</button>
+            )}
           </li>
         ))}
         {items.length === 0 && uploads.length === 0 && <li className="empty">No sarees in this colour yet. Choose All to see the full collection.</li>}
@@ -50,10 +53,10 @@ export default function CollectionPanel({ items, uploads, activeId, family, onFa
       {allowUpload && (
         <div className="upload">
           <button type="button" className="upload-btn" onClick={() => fileRef.current?.click()}>
-            Try your own fabric photo
+            Try a saree from a photo
           </button>
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={handleFile} />
-          <p className="upload-hint">A flat, straight photo of the fabric works best. It repeats across the saree body.</p>
+          <p className="upload-hint">The saree is draped straight away: body, border and pallu are found automatically. Product photos and phone pictures both work.</p>
           {uploadError && <p className="upload-error" role="alert">{uploadError}</p>}
         </div>
       )}

@@ -22,6 +22,11 @@ export function loadImage(src) {
   return imageCache.get(src);
 }
 
+/** Drop a cached image (used when a prepared saree is released). */
+export function forgetImage(src) {
+  imageCache.delete(src);
+}
+
 function scaledTile(img, widthPx, heightPx) {
   const w = Math.max(1, Math.round(widthPx));
   const h = Math.max(1, Math.round(heightPx ?? (img.height * w) / img.width));

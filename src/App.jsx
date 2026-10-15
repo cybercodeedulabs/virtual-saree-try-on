@@ -4,13 +4,18 @@ import { VIEWS } from './components/views';
 import ProductPanel from './components/ProductPanel';
 import CollectionPanel from './components/CollectionPanel';
 import StageControls from './components/StageControls';
-import { CATALOG, sareeFromUpload } from './data/catalog';
+import { CATALOG, sareeFromPrepared } from './data/catalog';
+import FabricPrep from './components/FabricPrep';
+import { deleteSaree, listSarees, saveSaree } from './lib/savedSarees';
+import { blouseSuggestions, buildRecord, loadPhoto, makeTiles } from './lib/prepareTiles';
+import { autoDetect } from './lib/autoDetect';
 import { SHOWROOM } from './config';
 import { releaseSaree, warmCollection } from './lib/sareeTextures';
 import { QA, QAOverlay } from './components/QAProbe';
 
 const params = new URLSearchParams(window.location.search);
 const KIOSK = params.has('kiosk');
+const STAFF = params.has('staff');            // ?kiosk=1&staff=1 shows saree preparation on the kiosk
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const canFullscreen = typeof document !== 'undefined' && document.fullscreenEnabled;
 const VIEW_KEYS = Object.keys(VIEWS);
@@ -28,7 +33,14 @@ export default function App() {
   const [error, setError] = useState(null);
   const [uploadError, setUploadError] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [prepFile, setPrepFile] = useState(null);
+  const [prepInit, setPrepInit] = useState(null);   // automatic result handed to the manual screen (Adjust)
+  const [reading, setReading] = useState(false);    // detecting the saree in a photo
+  const [autoInfo, setAutoInfo] = useState(null);   // last automatic drape: what was found, for Adjust / Save
+  const [saved, setSaved] = useState([]);
   const lastInput = useRef(0);
+  const prepOpen = useRef(false);
+  useEffect(() => { prepOpen.current = Boolean(prepFile); }, [prepFile]);
 
   const items = useMemo(
     () => (family === 'All' ? CATALOG : CATALOG.filter((s) => s.family === family)),
@@ -69,7 +81,7 @@ export default function App() {
     const t = setInterval(() => {
       const idle = performance.now() - lastInput.current;
       if (!reducedMotion && idle > SHOWROOM.idleRotateAfterMs) setIdleRotate(true);
-      if (KIOSK && idle > SHOWROOM.attractAfterMs) setAttract(true);
+      if (KIOSK && !prepOpen.current && idle > SHOWROOM.attractAfterMs) setAttract(true);
     }, 1000);
     return () => {
       clearInterval(t);
@@ -96,7 +108,7 @@ export default function App() {
   // ---- keyboard: arrows change saree, 1-5 change view ----
   useEffect(() => {
     const onKey = (e) => {
-      if (e.target instanceof HTMLInputElement) return;
+      if (e.target instanceof HTMLInputElement || prepOpen.current) return;
       if (e.key === 'ArrowRight') step(1);
       else if (e.key === 'ArrowLeft') step(-1);
       else if (/^[1-5]$/.test(e.key)) goView(VIEW_KEYS[+e.key - 1]);
@@ -129,26 +141,104 @@ export default function App() {
     else document.documentElement.requestFullscreen?.().catch(() => {});
   };
 
-  // ---- customer fabric photos ----
-  const handleUpload = (file, message) => {
+  // ---- sarees prepared from photos ----
+  useEffect(() => {
+    let live = true;
+    listSarees().then((recs) => live && setSaved(recs.map((r) => sareeFromPrepared(r, { saved: true }))));
+    return () => { live = false; };
+  }, []);
+
+  // A photo is draped straight away: body, border and pallu are found automatically.
+  // The manual screen (Adjust) is only needed when the result is not right.
+  const handleUpload = async (file, message) => {
     setUploadError(message ?? null);
     if (!file) return;
-    const saree = sareeFromUpload(URL.createObjectURL(file));
-    setUploads((prev) => {
-      const next = [saree, ...prev];
-      next.slice(3).forEach(releaseSaree); // keep the last three
-      return next.slice(0, 3);
-    });
+    setAutoInfo(null);
+    setReading(true);
+    try {
+      const photo = await loadPhoto(file);
+      await new Promise((r) => setTimeout(r, 30));            // let "Reading your photo" paint first
+      const det = autoDetect(photo);
+      if (QA) window.__qaDetect = det;
+      const name = nameFromFile(file);
+      if (!det) {
+        setUploadError('The saree could not be found in that photo automatically. Mark it on the photo instead.');
+        setPrepInit(null);
+        setPrepFile(file);
+        return;
+      }
+      const tiles = makeTiles(photo, det.regions, det.opt, det.skipped);
+      const blouse = blouseSuggestions(tiles)[0];
+      const record = await buildRecord({ tiles, opt: det.opt, name, blouse });
+      await applyPrepared(record, { save: false });
+      setAutoInfo({ file, det, name, blouse, record, border: Boolean(tiles.border), pallu: Boolean(tiles.pallu) });
+    } catch (err) {
+      console.error(err);
+      setUploadError('That photo could not be opened. Try a JPG or PNG.');
+    } finally {
+      setReading(false);
+    }
+  };
+
+  const adjustAuto = () => {
+    if (!autoInfo) return;
+    setPrepInit({ initial: autoInfo.det, name: autoInfo.name, blouse: autoInfo.blouse });
+    setPrepFile(autoInfo.file);
+    setAutoInfo(null);
+  };
+
+  const saveAuto = async () => {
+    if (!autoInfo) return;
+    const { record } = autoInfo;
+    setAutoInfo(null);
+    try {
+      await saveSaree(record);
+      const saree = sareeFromPrepared(record, { saved: true });
+      setUploads((prev) => prev.filter((u) => u.id !== record.id));
+      setSaved((prev) => [saree, ...prev]);
+      select(saree);
+    } catch {
+      setUploadError('This device would not allow saving. The saree is shown for this visit only.');
+    }
+  };
+
+  const applyPrepared = async (record, { save }) => {
+    setPrepFile(null);
+    setPrepInit(null);
+    let saree;
+    if (save) {
+      try {
+        await saveSaree(record);
+        saree = sareeFromPrepared(record, { saved: true });
+        setSaved((prev) => [saree, ...prev]);
+      } catch {
+        setUploadError('This device would not allow saving. The saree is shown for this visit only.');
+      }
+    }
+    if (!saree) {
+      saree = sareeFromPrepared(record);
+      setUploads((prev) => {
+        const next = [saree, ...prev];
+        next.slice(3).forEach(releaseSaree); // keep the last three
+        return next.slice(0, 3);
+      });
+    }
     select(saree);
+  };
+
+  const removeSaved = async (s) => {
+    await deleteSaree(s.id).catch(() => {});
+    setSaved((prev) => prev.filter((x) => x.id !== s.id));
+    if (item.id === s.id) setItem(CATALOG[0]);
+    releaseSaree(s);
   };
 
   const handleError = useCallback(
     (err) => {
       console.error(err);
-      if (item.isUpload) {
-        setUploadError('That photo could not be read. Try a JPG or PNG taken in good light.');
+      if (item.isUpload || item.isSaved) {
+        setUploadError('That saree could not be shown. Prepare it again from the photo.');
         setUploads((prev) => prev.filter((u) => u.id !== item.id));
-        releaseSaree(item);
         setItem(CATALOG[0]);
       } else {
         setError(`${item.name} could not be shown. Choose another saree from the collection.`);
@@ -159,42 +249,45 @@ export default function App() {
 
   return (
     <div className={`app ${KIOSK ? 'is-kiosk' : ''}`}>
-      <div className="stage">
+      <div className="stage" inert={Boolean(prepFile)}>
         <ModelViewer
           item={item}
           view={view}
           viewNonce={viewNonce}
           autoRotate={userRotate || idleRotate}
+          paused={Boolean(prepFile)}
           onUserInteract={markInput}
           onDraping={setDraping}
           onError={handleError}
         />
       </div>
 
-      <header className="brand">
+      <header className="brand" inert={Boolean(prepFile)}>
         <img src="/logo.webp" alt="" width="44" height="66" />
         <span>{SHOWROOM.storeName}</span>
       </header>
 
-      <aside className="left">
+      <aside className="left" inert={Boolean(prepFile)}>
         <ProductPanel key={item.id} item={item} draping={draping} index={index} total={CATALOG.length} />
       </aside>
 
-      <aside className="right">
+      <aside className="right" inert={Boolean(prepFile)}>
         <CollectionPanel
           items={items}
-          uploads={uploads}
+          uploads={[...uploads, ...saved]}
+          onRemoveSaved={removeSaved}
           activeId={item.id}
           family={family}
           onFamily={setFamily}
           onSelect={select}
           onUpload={handleUpload}
-          allowUpload={!KIOSK}
+          allowUpload={!KIOSK || STAFF}
           uploadError={uploadError}
         />
       </aside>
 
       <StageControls
+        inert={Boolean(prepFile)}
         view={view}
         onView={goView}
         rotating={userRotate || idleRotate}
@@ -205,7 +298,38 @@ export default function App() {
         onToggleFullscreen={canFullscreen ? toggleFullscreen : null}
       />
 
+      {prepFile && (
+        <FabricPrep
+          file={prepFile}
+          initial={prepInit?.initial}
+          initialName={prepInit?.name}
+          initialBlouse={prepInit?.blouse}
+          onClose={() => { setPrepFile(null); setPrepInit(null); }}
+          onApply={applyPrepared}
+          canSave
+        />
+      )}
+
       {QA && <QAOverlay />}
+
+      {reading && (
+        <div className="toast" role="status">
+          <span>Reading your photo: finding the body, border and pallu</span>
+        </div>
+      )}
+
+      {autoInfo && !reading && !prepFile && (
+        <div className="toast toast-auto" role="status">
+          <span>
+            Draped from your photo.
+            {!autoInfo.border && ' No border found: a matching plain border is used.'}
+            {!autoInfo.pallu && ' No separate pallu found: the body fabric is used for the pallu.'}
+          </span>
+          <button type="button" onClick={saveAuto}>Save</button>
+          <button type="button" onClick={adjustAuto}>Adjust</button>
+          <button type="button" onClick={() => setAutoInfo(null)} aria-label="Close">Close</button>
+        </div>
+      )}
 
       {error && (
         <div className="toast" role="alert">
@@ -215,4 +339,11 @@ export default function App() {
       )}
     </div>
   );
+}
+
+// "IMG_2041.jpg" -> "Saree from photo"; "kanchi-pink-silk.webp" -> "Kanchi pink silk"
+function nameFromFile(file) {
+  const base = (file?.name ?? '').replace(/\.[a-z0-9]+$/i, '').replace(/[-_]+/g, ' ').trim();
+  if (!base || /^(img|dsc|pxl|image|photo|whatsapp|screenshot)\b/i.test(base) || /^\d/.test(base) || base.length > 40) return 'Saree from photo';
+  return base.charAt(0).toUpperCase() + base.slice(1);
 }
